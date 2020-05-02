@@ -7,7 +7,7 @@ from serial import Serial
 import struct
 from threading import Thread
 
-__ALL__ = ['Device', 'MHR', 'Beacon', 'Command']
+__ALL__ = ['Device', 'MHR', 'Beacon', 'Cmd']
 
 class Device(object):
     header_struct = struct.Struct('!BB')
@@ -140,7 +140,7 @@ class Device(object):
                 event = Device.Event(response)
                 if event == Device.Event.on_packet:
                     rssi, link_quality = struct.unpack('!bB', data[-2:])
-                    data = (rssi, data)
+                    data = (data[:-2], rssi)
                 elif event == Device.Event.on_button:
                     data = struct.unpack('!B', data)
                 self.event_queue.put((event, data))
@@ -149,8 +149,8 @@ class Device(object):
             response = Device.Response(response)
             self.reader_queue.put((response, data))
 
-    def write(self, command, data=b''):
-        packet = Device.header_struct.pack(command.value, len(data)) + data
+    def write(self, cmd, data=b''):
+        packet = Device.header_struct.pack(cmd.value, len(data)) + data
         self.serial.write(packet)
         response, data = self.reader_queue.get()
         if response == Device.Response.err:
@@ -233,15 +233,21 @@ class MHR(object):
         version = 12
         src_mode = 14
 
+        def __str__(self):
+            return str(self.name)
+
     @unique
     class FrameType(IntEnum):
         beacon       = 0
         data         = 1
         ack          = 2
-        command      = 3
+        cmd          = 3
         multipurpose = 5
         fragment     = 6
         extended     = 7
+
+        def __str__(self):
+            return str(self.name)
 
     @unique
     class AddrMode(IntEnum):
@@ -249,12 +255,18 @@ class MHR(object):
         short = 2
         long  = 3
 
+        def __str__(self):
+            return str(self.name)
+
     @unique
     class Version(IntEnum):
         version_2003 = 0
         version_2006 = 1
         version_2015 = 2
         reserved     = 3
+
+        def __str__(self):
+            return str(self.name)
 
     @classmethod
     def decode(cls, data):
@@ -268,7 +280,7 @@ class MHR(object):
 
         dst_mode = MHR.AddrMode((mhr.frame_control >> MHR.FrameControl.dst_mode) & 0x3)
 
-        if (dst_mode in [MHR.AddrMode.short, MHR.AddrMode.long]):
+        if dst_mode in [MHR.AddrMode.short, MHR.AddrMode.long]:
             mhr.dst_panid, = struct.unpack_from('!H', data, offset)
             offset += 2
 
@@ -281,7 +293,7 @@ class MHR(object):
 
         src_mode = MHR.AddrMode((mhr.frame_control >> MHR.FrameControl.src_mode) & 0x3)
         
-        panid_compression = bool(mhr.frame_control >> MHR.FrameControl.panid_compression)
+        panid_compression = (mhr.frame_control >> MHR.FrameControl.panid_compression) & 1
         if src_mode in [MHR.AddrMode.short, MHR.AddrMode.long]:
             if panid_compression and dst_mode in [MHR.AddrMode.short, MHR.AddrMode.long]:
                 mhr.src_panid = mhr.dst_panid
@@ -296,7 +308,7 @@ class MHR(object):
             mhr.src_addr = data[offset:offset + 8]
             offset += 8
 
-        return mhr, offset
+        return mhr, data[offset:]
 
     def __init__(self):
         self.frame_control = 0
@@ -317,7 +329,7 @@ class MHR(object):
         
         src_mode = MHR.AddrMode((self.frame_control >> MHR.FrameControl.src_mode) & 0x3)
 
-        panid_compression = bool(self.frame_control >> MHR.FrameControl.panid_compression)
+        panid_compression = (self.frame_control >> MHR.FrameControl.panid_compression) & 1
         if src_mode in [MHR.AddrMode.short, MHR.AddrMode.long] and not panid_compression:
             data += struct.pack('!H', self.src_panid)
 
@@ -337,15 +349,24 @@ class Beacon(object):
         ble                = 12
         pan_coordinator    = 14
         association_permit = 15
-    
+
+        def __str__(self):
+            return str(self.name)
+
     @unique
     class GtsSpec(IntEnum):
         desc_count = 0
         permit     = 7
 
+        def __str__(self):
+            return str(self.name)
+
     @unique
     class GtsDirections(IntEnum):
         dir_mask = 0
+
+        def __str__(self):
+            return str(self.name)
 
     @unique
     class GtsDescriptor(IntEnum):
@@ -353,40 +374,46 @@ class Beacon(object):
         start_slot = 16
         gts_length = 20
 
+        def __str__(self):
+            return str(self.name)
+
     @classmethod
     def decode(cls, data):
+        beacon = cls()
+
         offset = 0
-        self.superframe, self.gts_spec = struct.unpack_from('!HB', data, offset)
-        num_desc = self.gts_spec & 0x3
+        beacon.superframe, beacon.gts_spec = struct.unpack_from('!HB', data, offset)
+        num_desc = beacon.gts_spec & 0x3
         offset += 3
 
         if (num_desc > 0):
-            self.gts_mask, = struct.unpack_from('!B', data, offset)
+            beacon.gts_mask, = struct.unpack_from('!B', data, offset)
             offset += 1
 
-            self.gts_desc = []
+            beacon.gts_desc = []
             for _ in range(num_desc):
                 short_addr, gts_info = struct.unpack_from('!HB', data, offset)
                 desc = gts_info << 16 | short_addr
-                self.gts_desc.append(desc)
+                beacon.gts_desc.append(desc)
                 offset += 3
 
-        self.pend_addr_spec, = struct.unpack_from('!B', data, offset)
+        pend_addr_spec, = struct.unpack_from('!B', data, offset)
         offset += 1
 
-        self.pend_addr = []
-        num_short = self.pend_addr_spec & 7
-        for _ in range(self.pend_addr_spec & 7):
+        beacon.pend_addr = []
+        num_short = pend_addr_spec & 7
+        for _ in range(pend_addr_spec & 7):
             short_addr, = struct.unpack_from('!H', data, offset)
-            self.pend_addr.append(short_addr)
+            beacon.pend_addr.append(short_addr)
             offset += 2
 
-        self.pend_addr = []
-        num_long = (self.pend_addr_spec >> 4) & 7
+        num_long = (pend_addr_spec >> 4) & 7
         for _ in range(num_long):
             long_addr = data[offset:offset + 8]
-            self.pend_addr.append(long_addr)
+            beacon.pend_addr.append(long_addr)
             offset += 8
+
+        return beacon, data[offset:]
 
     def encode(self):
         data = struct.pack('!HB', self.superframe, self.gts_spec)
@@ -417,9 +444,8 @@ class Beacon(object):
         self.superframe = 0
         self.gts_spec = 0
         self.pend_addr = []
-        pass
 
-class Command(object):
+class Cmd(object):
     @unique
     class Identifier(IntEnum):
         association_request         = 1
@@ -432,6 +458,9 @@ class Command(object):
         coordinator_realignment     = 8
         gts_request                 = 9
 
+        def __str__(self):
+            return str(self.name)
+
     class AssocCapability(IntEnum):
         alt_coordinator = 0
         device_type = 1
@@ -440,50 +469,70 @@ class Command(object):
         security = 6
         allocate_address = 7
 
+        def __str__(self):
+            return str(self.name)
+
     class AssocStatus(IntEnum):
         assoc_success = 0
         pan_at_capacity = 1
         access_denied = 2
 
+        def __str__(self):
+            return str(self.name)
+
     class DisassocReason(IntEnum):
         coord_leave = 1
         device_leave = 2
+
+        def __str__(self):
+            return str(self.name)
 
     class GtsCharacteristics(IntEnum):
         length = 0
         direction = 4
         char_type = 5
 
+        def __str__(self):
+            return str(self.name)
+
     @classmethod
     def decode(cls, data):
+        cmd = cls()
+
         offset = 0
-        self.command, = struct.unpack_from('!B', data, offset)
+        identifier, = struct.unpack_from('!B', data, offset)
+        cmd.identifier = Cmd.Identifier(identifier)
         offset += 1
 
-        if self.command == Command.Identifier.association_request:
-            self.capabillity, = struct.unpack_from('!B', data, offset)
+        if cmd.identifier == Cmd.Identifier.association_request:
+            cmd.capabillity, = struct.unpack_from('!B', data, offset)
             offset += 1
-        elif self.command == Command.Identifer.association_response:
-            self.short_addr, self.status = struct.unpack_from('!HB', data, offset)
+        elif cmd.identifier == Cmd.Identifier.association_response:
+            cmd.short_addr, cmd.status = struct.unpack_from('!HB', data, offset)
             offset += 3
-        elif self.command == Command.Identifier.disassociation_notification:
-            self.reason, = struct.unpack_from('!B', data, offset)
+        elif cmd.identifier == Cmd.Identifier.disassociation_notification:
+            cmd.reason, = struct.unpack_from('!B', data, offset)
             offset += 1
-        elif self.command == Command.Identifier.coordinator_realignment:
-            self.panid, self.coord_addr, self.channel, self.short_addr = struct.unpack_from('!HHBH', data, offset)
+        elif cmd.identifier == Cmd.Identifier.coordinator_realignment:
+            cmd.panid, cmd.coord_addr, cmd.channel, cmd.short_addr = struct.unpack_from('!HHBH', data, offset)
             offset += 7
-        elif self.command == Command.Identifier.gts_request:
-            self.characteristics == struct.unpack_from('!B', data, offset)
+        elif cmd.identifier == Cmd.Identifier.gts_request:
+            cmd.characteristics == struct.unpack_from('!B', data, offset)
+            offset += 1
+
+        return cmd, data[offset:]
 
     def encode(self):
-        data = struct.pack('!B', self.command)
-        if self.command == Command.Identifier.association_request:
+        data = struct.pack('!B', self.identifier)
+        if self.identifier == Cmd.Identifier.association_request:
             data += struct.pack('!B', self.capabillity)
-        elif self.command == Command.Identifier.association_response:
+        elif self.identifier == Cmd.Identifier.association_response:
             data += struct.pack('!HB', self.short_addr, self.status)
-        elif self.command == Command.Identifier.disassociation_notification:
+        elif self.identifier == Cmd.Identifier.disassociation_notification:
             data += struct.pack('!B', self.reason)
-        elif self.command == Command.Identifier.coordinator_realignment:
+        elif self.identifier == Cmd.Identifier.coordinator_realignment:
             data += struct.pack('!HHBH', self.panid, self.coord_addr, self.channel, self.short_addr)
-        elif self.command == Command.Identifer.gts_request:
+        elif self.identifier == Cmd.Identifier.gts_request:
             data += struct.pack('!B', self.characteristics)
+
+        return data

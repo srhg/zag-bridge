@@ -44,48 +44,23 @@ class Coordinator(object):
         if payload:
             print('payload:', payload)
 
-    def cmd_handler(self, mhr, cmd, payload):
-        if cmd.identifier == Cmd.Identifier.beacon_request:
-            self.beacon_request_handler(mhr, cmd)
+    def button_handler(self, button):
+        if button == 1:
+            mhr = MHR()
+            mhr.frame_control |= MHR.FrameType.cmd << MHR.FrameControl.type
+            mhr.frame_control |= MHR.AddrMode.short << MHR.FrameControl.dst_mode
+            mhr.dst_panid = 0xFFFF
+            mhr.dst_addr = 0xFFFF
+            packet = mhr.encode()
 
-    def beacon_request_handler(self, mhr, cmd):
-        if mhr.frame_control >> MHR.FrameControl.src_mode & 0x3 != MHR.AddrMode.none:
-            return
-        if mhr.frame_control >> MHR.FrameControl.dst_mode & 0x3 != MHR.AddrMode.short:
-            return
-        if mhr.dst_panid != 0xFFFF:
-            return
-        if mhr.dst_addr != 0xFFFF:
-            return
-        self.send_beacon()
+            cmd = Cmd()
+            cmd.identifier = Cmd.Identifier.beacon_request
+            packet += cmd.encode()
 
-    def send_beacon(self):
-        mhr = MHR()
-        mhr.frame_control |= MHR.FrameType.beacon << MHR.FrameControl.type
-        mhr.frame_control |= MHR.AddrMode.short << MHR.FrameControl.src_mode
-        mhr.src_panid = 0xBEEF
-        _, mhr.src_addr = self.device.get_value(Device.Param.short_addr)
-        packet = mhr.encode()
-
-        beacon = Beacon()
-        beacon.superframe |= 15 << Beacon.Superframe.beacon_order
-        beacon.superframe |= 15 << Beacon.Superframe.superframe_order
-        beacon.superframe |= 1 << Beacon.Superframe.pan_coordinator
-        beacon.superframe |= 1 << Beacon.Superframe.association_permit
-        packet += beacon.encode()
-
-        self.device.send_packet(packet)
+            self.device.send_packet(packet)
 
     def packet_handler(self, packet, rssi):
         self.debug_packet(packet)
-
-        mhr, payload = MHR.decode(packet)
-        if mhr.frame_control & 0x7 == MHR.FrameType.cmd:
-            cmd, payload = Cmd.decode(payload)
-            self.cmd_handler(mhr, cmd, payload)
-
-    def button_handler(self, button):
-        self.device.set_leds(1<<button, ~self.device.get_leds() & 0xFF)
 
     def loop(self):
         try:
