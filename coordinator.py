@@ -30,7 +30,7 @@ class Coordinator(object):
         print(', '.join(l) + ' - ' + data[offset:].decode('utf8'))
 
     def button_handler(self, button):
-        self.device.set_leds(1<<(button - 1), ~self.device.get_leds() & 0xFF)
+        self.device.set_leds(1<<button), ~self.device.get_leds() & 0xFF)
 
     def loop(self):
         try:
