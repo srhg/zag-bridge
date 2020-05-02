@@ -7,7 +7,7 @@ from serial import Serial
 import struct
 from threading import Thread
 
-__ALL__ = ['Device', 'MHR', 'Beacon', 'Cmd']
+__all__ = ['Device', 'MHR', 'Beacon', 'Cmd', 'debug_packet']
 
 class Device(object):
     header_struct = struct.Struct('!BB')
@@ -536,3 +536,29 @@ class Cmd(object):
             data += struct.pack('!B', self.characteristics)
 
         return data
+
+def debug_object(o):
+    l = []
+    for k, v in vars(o).items():
+        if isinstance(v, IntEnum):
+            v = repr(v)
+        elif isinstance(v, int):
+            v = f'0x{v:X}'
+        else:
+            v = repr(v)
+        l.append('%s:%s' % (k, v))
+    s = str(type(o)) + ': '
+    s += ', '.join(l)
+    print(s)
+
+def debug_packet(packet):
+    mhr, payload = MHR.decode(packet)
+    debug_object(mhr)
+    if mhr.frame_control & 0x7 == MHR.FrameType.beacon:
+        beacon, payload = Beacon.decode(payload)
+        debug_object(beacon)
+    elif mhr.frame_control & 0x7 == MHR.FrameType.cmd:
+        cmd, payload = Cmd.decode(payload)
+        debug_object(cmd)
+    if payload:
+        print('payload:', payload)

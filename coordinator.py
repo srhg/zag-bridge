@@ -18,32 +18,6 @@ class Coordinator(object):
         self.device.set_value(Device.Param.rx_mode, 0)
         self.device.set_value(Device.Param.tx_mode, Device.TxMode.send_on_cca)
 
-    def debug_object(self, o):
-        l = []
-        for k, v in vars(o).items():
-            if isinstance(v, IntEnum):
-                v = repr(v)
-            elif isinstance(v, int):
-                v = f'0x{v:X}'
-            else:
-                v = repr(v)
-            l.append('%s:%s' % (k, v))
-        s = str(type(o)) + ': '
-        s += ', '.join(l)
-        print(s)
-
-    def debug_packet(self, packet):
-        mhr, payload = MHR.decode(packet)
-        self.debug_object(mhr)
-        if mhr.frame_control & 0x7 == MHR.FrameType.beacon:
-            beacon, payload = Beacon.decode(payload)
-            self.debug_object(beacon)
-        elif mhr.frame_control & 0x7 == MHR.FrameType.cmd:
-            cmd, payload = Cmd.decode(payload)
-            self.debug_object(cmd)
-        if payload:
-            print('payload:', payload)
-
     def cmd_handler(self, mhr, cmd, payload):
         if cmd.identifier == Cmd.Identifier.beacon_request:
             self.beacon_request_handler(mhr, cmd)
@@ -77,7 +51,7 @@ class Coordinator(object):
         self.device.send_packet(packet)
 
     def packet_handler(self, packet, rssi):
-        self.debug_packet(packet)
+        debug_packet(packet)
 
         mhr, payload = MHR.decode(packet)
         if mhr.frame_control & 0x7 == MHR.FrameType.cmd:
