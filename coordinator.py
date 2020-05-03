@@ -6,6 +6,7 @@ import sys
 from time import sleep
 from zag import *
 from queue import Queue
+from random import randint
 
 
 class Coordinator(object):
@@ -23,6 +24,8 @@ class Coordinator(object):
         self.ssid = config.get('coordinator', 'ssid', fallback='Sample')
         self.services = [int(n) for n in config.get('coordinator', 'services', fallback='0').split(',')]
         self.services.sort()
+
+        self.bsn = randint(0, 255)
 
         self.dev.set_value(DEV.Param.channel, self.channel)
         self.dev.set_value(DEV.Param.rx_mode, 0)
@@ -47,6 +50,7 @@ class Coordinator(object):
         mhr = MHR()
         mhr.frame_control |= MHR.FrameType.bcn << MHR.FrameControl.type
         mhr.frame_control |= MHR.AddrMode.short << MHR.FrameControl.src_mode
+        mhr.seq_num = self.bsn
         mhr.src_panid = 0xBEEF
         _, mhr.src_addr = self.dev.get_value(DEV.Param.short_addr)
         packet = mhr.encode()
@@ -61,6 +65,7 @@ class Coordinator(object):
         packet += bcn.encode()
 
         self.dev.send_packet(packet)
+        self.bsn += 1
 
     def packet_handler(self, packet, rssi):
         debug_packet(packet)
