@@ -48,6 +48,11 @@ class Coordinator(object):
         beacon.superframe |= 1 << Beacon.Superframe.association_permit
         packet += beacon.encode()
 
+        beacon_payload = BeaconPayload()
+        beacon_payload.services = [0]
+        beacon_payload.ssid = b'Test'
+        packet += beacon_payload.encode()
+
         self.device.send_packet(packet)
 
     def packet_handler(self, packet, rssi):

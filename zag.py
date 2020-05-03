@@ -7,7 +7,7 @@ from serial import Serial
 import struct
 from threading import Thread
 
-__all__ = ['Device', 'MHR', 'Beacon', 'Cmd', 'debug_packet']
+__all__ = ['Device', 'MHR', 'Beacon', 'BeaconPayload', 'Cmd', 'debug_packet']
 
 class Device(object):
     header_struct = struct.Struct('!BB')
@@ -415,6 +415,11 @@ class Beacon(object):
 
         return beacon, data[offset:]
 
+    def __init__(self):
+        self.superframe = 0
+        self.gts_spec = 0
+        self.pend_addr = []
+
     def encode(self):
         data = struct.pack('!HB', self.superframe, self.gts_spec)
         num_desc = self.gts_spec & 0x3
@@ -440,10 +445,47 @@ class Beacon(object):
 
         return data
 
+class BeaconPayload(object):
+    @classmethod
+    def decode(cls, data):
+        beacon_payload = cls()
+
+        offset = 0
+        magic = data[offset:offset + 4]
+        if magic != b'Zag!':
+            return beacon_payload, data[offset:]
+        offset += 4
+
+        ssid_len, = struct.unpack_from('!B',data, offset)
+        offset += 1
+        beacon_payload.ssid = data[offset:offset + ssid_len]
+        offset += ssid_len
+
+        num_services, = struct.unpack_from('!B', data, offset)
+        offset += 1
+        for _ in range(num_services):
+            service, = struct.unpack_from('!H', data, offset)
+            beacon_payload.services.append(service)
+            offset += 2
+
+
+        return beacon_payload, data[offset:]
+
     def __init__(self):
-        self.superframe = 0
-        self.gts_spec = 0
-        self.pend_addr = []
+        self.services = []
+        self.ssid = b''
+
+    def encode(self):
+        data = b'Zag!'
+
+        data += struct.pack('!B', len(self.ssid))
+        data += self.ssid
+
+        data += struct.pack('!B', len(self.services))
+        for service in self.services:
+            data += struct.pack('!H', service)
+
+        return data
 
 class Cmd(object):
     @unique
@@ -557,6 +599,8 @@ def debug_packet(packet):
     if mhr.frame_control & 0x7 == MHR.FrameType.beacon:
         beacon, payload = Beacon.decode(payload)
         debug_object(beacon)
+        beacon_payload, payload = BeaconPayload.decode(payload)
+        debug_object(beacon_payload)
     elif mhr.frame_control & 0x7 == MHR.FrameType.cmd:
         cmd, payload = Cmd.decode(payload)
         debug_object(cmd)
