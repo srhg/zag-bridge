@@ -72,7 +72,7 @@ class DEV(object):
     class Param(IntEnum):
         power_mode            = 0
         channel               = 1
-        pan_id                = 2
+        panid                 = 2
         short_addr            = 3
         rx_mode               = 4
         tx_mode               = 5
