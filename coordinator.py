@@ -15,8 +15,10 @@ class Coordinator(object):
         _, ext = self.dev.get_object(DEV.Param.long_addr, 8)
         print('I\'m 0x%04X, %s' % (short, hexlify(ext).decode('utf8').upper()))
 
+        with open('config.ini', 'r') as f:
+            config_string = '[DEFAULT]\n' + f.read()
         config = ConfigParser()
-        config.read('config.ini')
+        config.read_string(config_string)
         self.channel = int(config.get('DEFAULT', 'channel', fallback='11'))
         self.ssid = config.get('coordinator', 'ssid', fallback='Sample')
         self.services = [int(n) for n in config.get('coordinator', 'services', fallback='0').split(',')]

@@ -16,8 +16,10 @@ class Device(object):
         _, ext = self.dev.get_object(DEV.Param.long_addr, 8)
         print('I\'m 0x%04X, %s' % (short, hexlify(ext).decode('utf8').upper()))
 
+        with open('config.ini', 'r') as f:
+            config_string = '[DEFAULT]\n' + f.read()
         config = ConfigParser()
-        config.read('config.ini')
+        config.read_string(config_string)
         self.channel = int(config.get('DEFAULT', 'channel', fallback='11'))
 
         self.dev.set_value(DEV.Param.channel, self.channel)
