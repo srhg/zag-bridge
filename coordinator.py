@@ -18,11 +18,14 @@ class Coordinator(object):
         self.device.set_value(Device.Param.rx_mode, 0)
         self.device.set_value(Device.Param.tx_mode, Device.TxMode.send_on_cca)
 
-    def cmd_handler(self, mhr, cmd, payload):
-        if cmd.identifier == Cmd.Identifier.beacon_request:
-            self.beacon_request_handler(mhr, cmd)
+        self.ssid = b'Test Coordinator'
+        self.services = [0]
 
-    def beacon_request_handler(self, mhr, cmd):
+    def cmd_handler(self, mhr, cmd, payload):
+        if cmd.identifier == CMD.Identifier.bcn_request:
+            self.bcn_request_handler(mhr, cmd)
+
+    def bcn_request_handler(self, mhr, cmd):
         if mhr.frame_control >> MHR.FrameControl.src_mode & 0x3 != MHR.AddrMode.none:
             return
         if mhr.frame_control >> MHR.FrameControl.dst_mode & 0x3 != MHR.AddrMode.short:
@@ -31,27 +34,24 @@ class Coordinator(object):
             return
         if mhr.dst_addr != 0xFFFF:
             return
-        self.send_beacon()
+        self.send_bcn()
 
-    def send_beacon(self):
+    def send_bcn(self):
         mhr = MHR()
-        mhr.frame_control |= MHR.FrameType.beacon << MHR.FrameControl.type
+        mhr.frame_control |= MHR.FrameType.bcn << MHR.FrameControl.type
         mhr.frame_control |= MHR.AddrMode.short << MHR.FrameControl.src_mode
         mhr.src_panid = 0xBEEF
         _, mhr.src_addr = self.device.get_value(Device.Param.short_addr)
         packet = mhr.encode()
 
-        beacon = Beacon()
-        beacon.superframe |= 15 << Beacon.Superframe.beacon_order
-        beacon.superframe |= 15 << Beacon.Superframe.superframe_order
-        beacon.superframe |= 1 << Beacon.Superframe.pan_coordinator
-        beacon.superframe |= 1 << Beacon.Superframe.association_permit
-        packet += beacon.encode()
-
-        beacon_payload = BeaconPayload()
-        beacon_payload.services = [0]
-        beacon_payload.ssid = b'Test'
-        packet += beacon_payload.encode()
+        bcn = BCN()
+        bcn.superframe |= 15 << BCN.Superframe.bcn_order
+        bcn.superframe |= 15 << BCN.Superframe.superframe_order
+        bcn.superframe |= 1 << BCN.Superframe.pan_coordinator
+        bcn.superframe |= 1 << BCN.Superframe.association_permit
+        bcn.ssid = 'Move Zag'
+        bcn.services = [0]
+        packet += bcn.encode()
 
         self.device.send_packet(packet)
 
@@ -60,7 +60,7 @@ class Coordinator(object):
 
         mhr, payload = MHR.decode(packet)
         if mhr.frame_control & 0x7 == MHR.FrameType.cmd:
-            cmd, payload = Cmd.decode(payload)
+            cmd, payload = CMD.decode(payload)
             self.cmd_handler(mhr, cmd, payload)
 
     def button_handler(self, button):

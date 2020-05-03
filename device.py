@@ -28,8 +28,8 @@ class Coordinator(object):
             mhr.dst_addr = 0xFFFF
             packet = mhr.encode()
 
-            cmd = Cmd()
-            cmd.identifier = Cmd.Identifier.beacon_request
+            cmd = CMD()
+            cmd.identifier = CMD.Identifier.bcn_request
             packet += cmd.encode()
 
             self.device.send_packet(packet)

@@ -7,7 +7,7 @@ from serial import Serial
 import struct
 from threading import Thread
 
-__all__ = ['Device', 'MHR', 'Beacon', 'BeaconPayload', 'Cmd', 'debug_packet']
+__all__ = ['Device', 'MHR', 'BCN', 'CMD', 'debug_packet']
 
 class Device(object):
     header_struct = struct.Struct('!BB')
@@ -238,7 +238,7 @@ class MHR(object):
 
     @unique
     class FrameType(IntEnum):
-        beacon       = 0
+        bcn          = 0
         data         = 1
         ack          = 2
         cmd          = 3
@@ -340,10 +340,10 @@ class MHR(object):
         
         return data
 
-class Beacon(object):
+class BCN(object):
     @unique
     class Superframe(IntEnum):
-        beacon_order       = 0
+        bcn_order       = 0
         superframe_order   = 4
         final_cap_slot     = 8
         ble                = 12
@@ -379,46 +379,66 @@ class Beacon(object):
 
     @classmethod
     def decode(cls, data):
-        beacon = cls()
+        bcn = cls()
 
         offset = 0
-        beacon.superframe, beacon.gts_spec = struct.unpack_from('!HB', data, offset)
-        num_desc = beacon.gts_spec & 0x3
+        bcn.superframe, bcn.gts_spec = struct.unpack_from('!HB', data, offset)
+        num_desc = bcn.gts_spec & 0x3
         offset += 3
 
         if (num_desc > 0):
-            beacon.gts_mask, = struct.unpack_from('!B', data, offset)
+            bcn.gts_mask, = struct.unpack_from('!B', data, offset)
             offset += 1
 
-            beacon.gts_desc = []
+            bcn.gts_desc = []
             for _ in range(num_desc):
                 short_addr, gts_info = struct.unpack_from('!HB', data, offset)
                 desc = gts_info << 16 | short_addr
-                beacon.gts_desc.append(desc)
+                bcn.gts_desc.append(desc)
                 offset += 3
 
         pend_addr_spec, = struct.unpack_from('!B', data, offset)
         offset += 1
 
-        beacon.pend_addr = []
+        bcn.pend_addr = []
         num_short = pend_addr_spec & 7
         for _ in range(pend_addr_spec & 7):
             short_addr, = struct.unpack_from('!H', data, offset)
-            beacon.pend_addr.append(short_addr)
+            bcn.pend_addr.append(short_addr)
             offset += 2
 
         num_long = (pend_addr_spec >> 4) & 7
         for _ in range(num_long):
             long_addr = data[offset:offset + 8]
-            beacon.pend_addr.append(long_addr)
+            bcn.pend_addr.append(long_addr)
             offset += 8
 
-        return beacon, data[offset:]
+        magic = data[offset:offset + 4]
+        if magic != b'Zag!':
+            return bcn, data[offset:]
+        offset += 4
+
+        ssid_len, = struct.unpack_from('!B',data, offset)
+        offset += 1
+        ssid = data[offset:offset + ssid_len]
+        bcn.ssid = ssid.decode('utf8')
+        offset += ssid_len
+
+        num_services, = struct.unpack_from('!B', data, offset)
+        offset += 1
+        for _ in range(num_services):
+            service, = struct.unpack_from('!H', data, offset)
+            bcn.services.append(service)
+            offset += 2
+
+        return bcn, data[offset:]
 
     def __init__(self):
         self.superframe = 0
         self.gts_spec = 0
         self.pend_addr = []
+        self.ssid = b''
+        self.services = []
 
     def encode(self):
         data = struct.pack('!HB', self.superframe, self.gts_spec)
@@ -443,43 +463,11 @@ class Beacon(object):
         for addr in long_addr:
             data += long_addr
 
-        return data
+        data += b'Zag!'
 
-class BeaconPayload(object):
-    @classmethod
-    def decode(cls, data):
-        beacon_payload = cls()
-
-        offset = 0
-        magic = data[offset:offset + 4]
-        if magic != b'Zag!':
-            return beacon_payload, data[offset:]
-        offset += 4
-
-        ssid_len, = struct.unpack_from('!B',data, offset)
-        offset += 1
-        beacon_payload.ssid = data[offset:offset + ssid_len]
-        offset += ssid_len
-
-        num_services, = struct.unpack_from('!B', data, offset)
-        offset += 1
-        for _ in range(num_services):
-            service, = struct.unpack_from('!H', data, offset)
-            beacon_payload.services.append(service)
-            offset += 2
-
-
-        return beacon_payload, data[offset:]
-
-    def __init__(self):
-        self.services = []
-        self.ssid = b''
-
-    def encode(self):
-        data = b'Zag!'
-
-        data += struct.pack('!B', len(self.ssid))
-        data += self.ssid
+        ssid = self.ssid.encode('utf8')
+        data += struct.pack('!B', len(ssid))
+        data += ssid
 
         data += struct.pack('!B', len(self.services))
         for service in self.services:
@@ -487,7 +475,7 @@ class BeaconPayload(object):
 
         return data
 
-class Cmd(object):
+class CMD(object):
     @unique
     class Identifier(IntEnum):
         association_request         = 1
@@ -496,7 +484,7 @@ class Cmd(object):
         data_request                = 4
         panid_conflict              = 5
         orphan_notification         = 6
-        beacon_request              = 7
+        bcn_request              = 7
         coordinator_realignment     = 8
         gts_request                 = 9
 
@@ -543,22 +531,22 @@ class Cmd(object):
 
         offset = 0
         identifier, = struct.unpack_from('!B', data, offset)
-        cmd.identifier = Cmd.Identifier(identifier)
+        cmd.identifier = CMD.Identifier(identifier)
         offset += 1
 
-        if cmd.identifier == Cmd.Identifier.association_request:
+        if cmd.identifier == CMD.Identifier.association_request:
             cmd.capabillity, = struct.unpack_from('!B', data, offset)
             offset += 1
-        elif cmd.identifier == Cmd.Identifier.association_response:
+        elif cmd.identifier == CMD.Identifier.association_response:
             cmd.short_addr, cmd.status = struct.unpack_from('!HB', data, offset)
             offset += 3
-        elif cmd.identifier == Cmd.Identifier.disassociation_notification:
+        elif cmd.identifier == CMD.Identifier.disassociation_notification:
             cmd.reason, = struct.unpack_from('!B', data, offset)
             offset += 1
-        elif cmd.identifier == Cmd.Identifier.coordinator_realignment:
+        elif cmd.identifier == CMD.Identifier.coordinator_realignment:
             cmd.panid, cmd.coord_addr, cmd.channel, cmd.short_addr = struct.unpack_from('!HHBH', data, offset)
             offset += 7
-        elif cmd.identifier == Cmd.Identifier.gts_request:
+        elif cmd.identifier == CMD.Identifier.gts_request:
             cmd.characteristics == struct.unpack_from('!B', data, offset)
             offset += 1
 
@@ -566,15 +554,15 @@ class Cmd(object):
 
     def encode(self):
         data = struct.pack('!B', self.identifier)
-        if self.identifier == Cmd.Identifier.association_request:
+        if self.identifier == CMD.Identifier.association_request:
             data += struct.pack('!B', self.capabillity)
-        elif self.identifier == Cmd.Identifier.association_response:
+        elif self.identifier == CMD.Identifier.association_response:
             data += struct.pack('!HB', self.short_addr, self.status)
-        elif self.identifier == Cmd.Identifier.disassociation_notification:
+        elif self.identifier == CMD.Identifier.disassociation_notification:
             data += struct.pack('!B', self.reason)
-        elif self.identifier == Cmd.Identifier.coordinator_realignment:
+        elif self.identifier == CMD.Identifier.coordinator_realignment:
             data += struct.pack('!HHBH', self.panid, self.coord_addr, self.channel, self.short_addr)
-        elif self.identifier == Cmd.Identifier.gts_request:
+        elif self.identifier == CMD.Identifier.gts_request:
             data += struct.pack('!B', self.characteristics)
 
         return data
@@ -596,13 +584,11 @@ def debug_object(o):
 def debug_packet(packet):
     mhr, payload = MHR.decode(packet)
     debug_object(mhr)
-    if mhr.frame_control & 0x7 == MHR.FrameType.beacon:
-        beacon, payload = Beacon.decode(payload)
-        debug_object(beacon)
-        beacon_payload, payload = BeaconPayload.decode(payload)
-        debug_object(beacon_payload)
+    if mhr.frame_control & 0x7 == MHR.FrameType.bcn:
+        bcn, payload = BCN.decode(payload)
+        debug_object(bcn)
     elif mhr.frame_control & 0x7 == MHR.FrameType.cmd:
-        cmd, payload = Cmd.decode(payload)
+        cmd, payload = CMD.decode(payload)
         debug_object(cmd)
     if payload:
         print('payload:', payload)
