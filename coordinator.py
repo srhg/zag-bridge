@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from binascii import hexlify
+from configparser import ConfigParser
 import sys
 from time import sleep
 from zag import *
@@ -14,12 +15,16 @@ class Coordinator(object):
         _, ext = self.dev.get_object(DEV.Param.long_addr, 8)
         print('I\'m 0x%04X, %s' % (short, hexlify(ext).decode('utf8').upper()))
 
-        self.dev.set_value(DEV.Param.channel, 11)
+        config = ConfigParser()
+        config.read('config.ini')
+        self.channel = int(config.get('DEFAULT', 'channel', fallback='11'))
+        self.ssid = config.get('coordinator', 'ssid', fallback='Sample')
+        self.services = [int(n) for n in config.get('coordinator', 'services', fallback='0').split(',')]
+        self.services.sort()
+
+        self.dev.set_value(DEV.Param.channel, self.channel)
         self.dev.set_value(DEV.Param.rx_mode, 0)
         self.dev.set_value(DEV.Param.tx_mode, DEV.TxMode.send_on_cca)
-
-        self.ssid = b'Test Coordinator'
-        self.services = [0]
 
     def cmd_handler(self, mhr, cmd, payload):
         if cmd.identifier == CMD.Identifier.bcn_request:
@@ -49,8 +54,8 @@ class Coordinator(object):
         bcn.superframe |= 15 << BCN.Superframe.superframe_order
         bcn.superframe |= 1 << BCN.Superframe.pan_coordinator
         bcn.superframe |= 1 << BCN.Superframe.association_permit
-        bcn.ssid = 'Move Zag'
-        bcn.services = [0]
+        bcn.ssid = self.ssid
+        bcn.services = self.services
         packet += bcn.encode()
 
         self.dev.send_packet(packet)

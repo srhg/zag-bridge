@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from binascii import hexlify
+from configparser import ConfigParser
 import sys
 from time import sleep
 from zag import *
@@ -8,14 +9,18 @@ from queue import Queue
 from enum import IntEnum
 
 
-class Coordinator(object):
+class Device(object):
     def __init__(self, port):
         self.dev = DEV(port)
         _, short = self.dev.get_value(DEV.Param.short_addr)
         _, ext = self.dev.get_object(DEV.Param.long_addr, 8)
         print('I\'m 0x%04X, %s' % (short, hexlify(ext).decode('utf8').upper()))
 
-        self.dev.set_value(DEV.Param.channel, 11)
+        config = ConfigParser()
+        config.read('config.ini')
+        self.channel = int(config.get('DEFAULT', 'channel', fallback='11'))
+
+        self.dev.set_value(DEV.Param.channel, self.channel)
         self.dev.set_value(DEV.Param.rx_mode, 0)
         self.dev.set_value(DEV.Param.tx_mode, DEV.TxMode.send_on_cca)
 
@@ -50,5 +55,5 @@ class Coordinator(object):
 
 
 if __name__ == '__main__':
-    coordinator = Coordinator(sys.argv[1])
+    coordinator = Device(sys.argv[1])
     coordinator.loop()
