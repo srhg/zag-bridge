@@ -7,9 +7,9 @@ from serial import Serial
 import struct
 from threading import Thread
 
-__all__ = ['Device', 'MHR', 'BCN', 'CMD', 'debug_packet']
+__all__ = ['DEV', 'MHR', 'BCN', 'CMD', 'debug_packet']
 
-class Device(object):
+class DEV(object):
     header_struct = struct.Struct('!BB')
 
     @unique
@@ -127,48 +127,48 @@ class Device(object):
                     continue
                 self.do_sync = False
 
-            data = self.serial.read(Device.header_struct.size)
-            if len(data) != Device.header_struct.size:
+            data = self.serial.read(DEV.header_struct.size)
+            if len(data) != DEV.header_struct.size:
                 continue
-            response, data_len = Device.header_struct.unpack(data)
+            response, data_len = DEV.header_struct.unpack(data)
 
             data = self.serial.read(data_len)
             if len(data) != data_len:
                 continue
 
             if response & 0xC0 == 0xC0:
-                event = Device.Event(response)
-                if event == Device.Event.on_packet:
+                event = DEV.Event(response)
+                if event == DEV.Event.on_packet:
                     rssi, link_quality = struct.unpack('!bB', data[-2:])
                     data = (data[:-2], rssi)
-                elif event == Device.Event.on_button:
+                elif event == DEV.Event.on_button:
                     data = struct.unpack('!B', data)
                 self.event_queue.put((event, data))
                 continue
 
-            response = Device.Response(response)
+            response = DEV.Response(response)
             self.reader_queue.put((response, data))
 
     def write(self, cmd, data=b''):
-        packet = Device.header_struct.pack(cmd.value, len(data)) + data
+        packet = DEV.header_struct.pack(cmd.value, len(data)) + data
         self.serial.write(packet)
         response, data = self.reader_queue.get()
-        if response == Device.Response.err:
-            raise Device.ResponseErr
+        if response == DEV.Response.err:
+            raise DEV.ResponseErr
         return data
 
     def send_packet(self, data):
-        data = self.write(Device.Request.send_packet, data)
+        data = self.write(DEV.Request.send_packet, data)
         result, = struct.unpack('!H', data)
-        result = Device.TransmitResult(result)
+        result = DEV.TransmitResult(result)
         return result,
 
     def get_mem(self, addr, n=1, reverse=False):
         data = struct.pack('!HB', int(addr), int(n))
         if reverse:
-            data = self.write(Device.Request.get_mem_rev, data)
+            data = self.write(DEV.Request.get_mem_rev, data)
         else:
-            data = self.write(Device.Request.get_mem, data)
+            data = self.write(DEV.Request.get_mem, data)
         if n == 1:
             data = data[0]
         return data
@@ -179,46 +179,46 @@ class Device(object):
         else:
             data = struct.pack('!H', int(addr)) + data
         if reverse:
-            self.write(Device.Request.set_mem_rev, data)
+            self.write(DEV.Request.set_mem_rev, data)
         else:
-            self.write(Device.Request.set_mem, data)
+            self.write(DEV.Request.set_mem, data)
 
     def get_value(self, param):
         data = struct.pack('!H', int(param))
-        data = self.write(Device.Request.get_value, data)
+        data = self.write(DEV.Request.get_value, data)
         result, value = struct.unpack('!HH', data)
-        result = Device.Result(result)
+        result = DEV.Result(result)
         return result, value
 
     def set_value(self, param, value):
         data = struct.pack('!HH', int(param), value)
-        data = self.write(Device.Request.set_value, data)
+        data = self.write(DEV.Request.set_value, data)
         result, = struct.unpack('!H', data)
-        result = Device.Result(result)
+        result = DEV.Result(result)
         return result,
     
     def get_object(self, param, expected_len):
         data = struct.pack('!HB', int(param), expected_len)
-        data = self.write(Device.Request.get_object, data)
+        data = self.write(DEV.Request.get_object, data)
         result, = struct.unpack('!H', data[:2])
-        result = Device.Result(result)
+        result = DEV.Result(result)
         return result, data[2:]
 
     def set_object(self, param, data):
         data = struct.pack('!HH', int(param), len(data)) + data
-        data = self.write(Device.Request.set_object, data)
+        data = self.write(DEV.Request.set_object, data)
         result, = struct.unpack('!H', data)
-        result = Device.Result(result)
+        result = DEV.Result(result)
         return result,
 
     def get_leds(self):
-        data = self.write(Device.Request.get_leds)
+        data = self.write(DEV.Request.get_leds)
         leds, = struct.unpack('!B', data)
         return leds
 
     def set_leds(self, mask, values):
         data = struct.pack('!BB', int(mask), int(values))
-        self.write(Device.Request.set_leds, data)
+        self.write(DEV.Request.set_leds, data)
         return True
 
 class MHR(object):
@@ -493,7 +493,7 @@ class CMD(object):
 
     class AssocCapability(IntEnum):
         alt_coordinator = 0
-        device_type = 1
+        dev_type = 1
         power_source = 2
         idle_recv = 3
         security = 6
@@ -512,7 +512,7 @@ class CMD(object):
 
     class DisassocReason(IntEnum):
         coord_leave = 1
-        device_leave = 2
+        dev_leave = 2
 
         def __str__(self):
             return str(self.name)
