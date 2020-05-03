@@ -75,7 +75,7 @@ class Coordinator(object):
         short_addr = 0xFFFF
         for short, long in self.devices.items():
             if long == long_addr:
-                short_addr = int(short, 0)
+                short_addr = short
 
         status = CMD.AssocStatus.assoc_success
         if short_addr > 0xFFFD:
