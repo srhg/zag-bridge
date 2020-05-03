@@ -20,32 +20,93 @@ class Device(object):
         config = ConfigParser()
         config.read_string(config_string)
         self.channel = int(config.get('DEFAULT', 'channel', fallback='11'))
-
+        self.panid = int(config.get('device', 'panid', fallback='0xFFFF'), 0)
+        self.coordinator = int(config.get('device', 'coordinator', fallback='0xFFFF'), 0)
+        self.service = int(config.get('device', 'service', fallback=-1), 0)
+        self.ssid = config.get('device', 'ssid', fallback=None)
         self.dsn = randint(0, 255)
 
         self.dev.set_value(DEV.Param.channel, self.channel)
         self.dev.set_value(DEV.Param.rx_mode, 0)
         self.dev.set_value(DEV.Param.tx_mode, DEV.TxMode.send_on_cca)
 
+    def send_beacon_request(self):
+        mhr = MHR()
+        mhr.frame_control |= MHR.FrameType.cmd << MHR.FrameControl.type
+        mhr.frame_control |= MHR.AddrMode.short << MHR.FrameControl.dst_mode
+        mhr.seq_num = self.dsn
+        mhr.dst_panid = 0xFFFF
+        mhr.dst_addr = 0xFFFF
+        packet = mhr.encode()
+
+        cmd = CMD()
+        cmd.identifier = CMD.Identifier.bcn_request
+        packet += cmd.encode()
+
+        self.dev.send_packet(packet)
+        self.dsn += 1
+
+    def send_assoc_req(self, panid, addr):
+        mhr = MHR()
+        mhr.frame_control |= MHR.FrameType.cmd << MHR.FrameControl.type
+        mhr.frame_control |= 1 << MHR.FrameControl.req_ack
+        mhr.frame_control |= MHR.AddrMode.short << MHR.FrameControl.dst_mode
+        mhr.frame_control |= MHR.AddrMode.long << MHR.FrameControl.src_mode
+        mhr.seq_num = self.dsn
+        mhr.dst_panid = panid
+        mhr.dst_addr = addr
+        mhr.src_panid = 0xFFFF
+        _, mhr.src_addr = self.dev.get_object(DEV.Param.long_addr, 8)
+        packet = mhr.encode()
+
+        cmd = CMD()
+        cmd.identifier = CMD.Identifier.association_request
+        cmd.capability |= 1 << CMD.AssocCapability.power_source
+        cmd.capability |= 1 << CMD.AssocCapability.idle_recv
+        cmd.capability |= 1 << CMD.AssocCapability.allocate_address
+        packet += cmd.encode()
+
+        self.dev.send_packet(packet)
+        self.dsn += 1
+
     def button_handler(self, button):
         if button == 1:
-            mhr = MHR()
-            mhr.frame_control |= MHR.FrameType.cmd << MHR.FrameControl.type
-            mhr.frame_control |= MHR.AddrMode.short << MHR.FrameControl.dst_mode
-            mhr.seq_num = self.dsn
-            mhr.dst_panid = 0xFFFF
-            mhr.dst_addr = 0xFFFF
-            packet = mhr.encode()
+            self.send_beacon_request()
 
-            cmd = CMD()
-            cmd.identifier = CMD.Identifier.bcn_request
-            packet += cmd.encode()
+    def bcn_handler(self, mhr, bcn, payload):
+        if self.panid <= 0xFFFD:
+            return
+        
+        if mhr.frame_control >> MHR.FrameControl.src_mode & 0x3 != MHR.AddrMode.short:
+            return
+        if mhr.frame_control >> MHR.FrameControl.dst_mode & 0x3 != MHR.AddrMode.none:
+            return
+        if mhr.src_panid > 0xFFFD:
+            return
+        if mhr.src_addr > 0xFFFD:
+            return
 
-            self.dev.send_packet(packet)
-            self.dsn += 1
+        if not bcn.superframe & BCN.Superframe.pan_coordinator:
+            return
+
+        if not bcn.superframe & BCN.Superframe.association_permit:
+            return
+
+        if self.ssid != None and self.ssid != bcn.ssid:
+            return
+
+        if self.service not in bcn.services:
+            return
+
+        self.send_assoc_req(mhr.src_panid, mhr.src_addr)
 
     def packet_handler(self, packet, rssi):
         debug_packet(packet)
+
+        mhr, payload = MHR.decode(packet)
+        if mhr.frame_control & 0x7 == MHR.FrameType.bcn:
+            bcn, payload = BCN.decode(payload)
+            self.bcn_handler(mhr, bcn, payload)
 
     def loop(self):
         try:

@@ -33,21 +33,6 @@ class Coordinator(object):
         self.dev.set_value(DEV.Param.rx_mode, 0)
         self.dev.set_value(DEV.Param.tx_mode, DEV.TxMode.send_on_cca)
 
-    def cmd_handler(self, mhr, cmd, payload):
-        if cmd.identifier == CMD.Identifier.bcn_request:
-            self.bcn_request_handler(mhr, cmd)
-
-    def bcn_request_handler(self, mhr, cmd):
-        if mhr.frame_control >> MHR.FrameControl.src_mode & 0x3 != MHR.AddrMode.none:
-            return
-        if mhr.frame_control >> MHR.FrameControl.dst_mode & 0x3 != MHR.AddrMode.short:
-            return
-        if mhr.dst_panid != 0xFFFF:
-            return
-        if mhr.dst_addr != 0xFFFF:
-            return
-        self.send_bcn()
-
     def send_bcn(self):
         mhr = MHR()
         mhr.frame_control |= MHR.FrameType.bcn << MHR.FrameControl.type
@@ -68,6 +53,21 @@ class Coordinator(object):
 
         self.dev.send_packet(packet)
         self.bsn += 1
+
+    def bcn_request_handler(self, mhr, cmd):
+        if mhr.frame_control >> MHR.FrameControl.src_mode & 0x3 != MHR.AddrMode.none:
+            return
+        if mhr.frame_control >> MHR.FrameControl.dst_mode & 0x3 != MHR.AddrMode.short:
+            return
+        if mhr.dst_panid != 0xFFFF:
+            return
+        if mhr.dst_addr != 0xFFFF:
+            return
+        self.send_bcn()
+
+    def cmd_handler(self, mhr, cmd, payload):
+        if cmd.identifier == CMD.Identifier.bcn_request:
+            self.bcn_request_handler(mhr, cmd)
 
     def packet_handler(self, packet, rssi):
         debug_packet(packet)

@@ -343,7 +343,7 @@ class MHR(object):
 class BCN(object):
     @unique
     class Superframe(IntEnum):
-        bcn_order       = 0
+        bcn_order          = 0
         superframe_order   = 4
         final_cap_slot     = 8
         ble                = 12
@@ -535,7 +535,7 @@ class CMD(object):
         offset += 1
 
         if cmd.identifier == CMD.Identifier.association_request:
-            cmd.capabillity, = struct.unpack_from('!B', data, offset)
+            cmd.capability, = struct.unpack_from('!B', data, offset)
             offset += 1
         elif cmd.identifier == CMD.Identifier.association_response:
             cmd.short_addr, cmd.status = struct.unpack_from('!HB', data, offset)
@@ -552,10 +552,20 @@ class CMD(object):
 
         return cmd, data[offset:]
 
+    def __init__(self):
+        self.capability = 0
+        self.short_addr = None
+        self.status = 0
+        self.reason = 0
+        self.panid = 0
+        self.coord_addr = 0
+        self.channel = 0
+        self.characteristics = 0
+
     def encode(self):
         data = struct.pack('!B', self.identifier)
         if self.identifier == CMD.Identifier.association_request:
-            data += struct.pack('!B', self.capabillity)
+            data += struct.pack('!B', self.capability)
         elif self.identifier == CMD.Identifier.association_response:
             data += struct.pack('!HB', self.short_addr, self.status)
         elif self.identifier == CMD.Identifier.disassociation_notification:
