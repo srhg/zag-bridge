@@ -66,6 +66,10 @@ class Coordinator(object):
         self.blink |= leds
         self.blink_last = time()
 
+    def end_blink(self, leds):
+        self.dev.set_leds(leds, ~leds)
+        self.blink &= ~leds
+
     def send_packet_wait_ack(self, packet):
         self.packet = packet
         self.packet_last = time()
@@ -201,8 +205,7 @@ class Coordinator(object):
             if self.associate != None:
                 self.send_association_response(self.associate)
                 self.associate = None
-                self.dev.set_leds(DEV.Leds.green, ~DEV.Leds.green)
-                self.blink &= ~DEV.Leds.green
+                self.end_blink(DEV.Leds.green)
 
     def loop(self):
         try:
@@ -221,8 +224,7 @@ class Coordinator(object):
                 if self.associate and self.associate_start + 30 <= now:
                     self.send_association_response(self.associate, True)
                     self.associate = None
-                    slelf.blink &= ~DEV.Leds.green
-                    self.dev.set_leds(DEV.Leds.green, ~DEV.Leds.green)
+                    self.end_blink(DEV.Leds.green)
 
                 if self.blink and self.blink_last + 0.25 <= now:
                     self.blink_last = now
