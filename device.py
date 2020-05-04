@@ -5,8 +5,9 @@ from configparser import ConfigParser
 import sys
 from time import sleep
 from zag import *
-from queue import Queue
+from queue import Queue, Empty
 from random import randint
+from time import time
 
 class Device(object):
     def __init__(self, port):
@@ -18,10 +19,12 @@ class Device(object):
         self.load_config()
 
         self.dsn = randint(0, 255)
+        self.packet = None
 
         self.dev.set_value(DEV.Param.channel, self.channel)
         self.dev.set_value(DEV.Param.rx_mode, 0)
         self.dev.set_value(DEV.Param.tx_mode, DEV.TxMode.send_on_cca)
+        self.dev.set_leds(0xFF, 0)
 
     def load_config(self):
         self.config.read('device.ini')
@@ -34,6 +37,20 @@ class Device(object):
     def save_config(self):
         with open('coordinator.ini', 'w') as config_file:
             self.config.write(config_file)
+
+    def send_packet_wait_ack(self, packet):
+        self.packet = packet
+        self.packet_last = time()
+        self.packet_retry = 0
+        self.packet_seq = self.dsn
+        self.dev.send_packet(packet)
+
+    def send_ack(self, seq_num):
+        mhr = MHR()
+        mhr.frame_control |= MHR.FrameType.ack << MHR.FrameControl.type
+        mhr.seq_num = seq_num
+        packet += mhr.encode()
+        self.dev.send_packet(packet)
 
     def send_beacon_request(self):
         mhr = MHR()
@@ -51,7 +68,7 @@ class Device(object):
         self.dev.send_packet(packet)
         self.dsn = (self.dsn + 1) & 0xFF
 
-    def send_assoc_req(self, panid, short_addr):
+    def send_assoc_request(self, panid, short_addr):
         mhr = MHR()
         mhr.frame_control |= MHR.FrameType.cmd << MHR.FrameControl.type
         mhr.frame_control |= 1 << MHR.FrameControl.req_ack
@@ -71,12 +88,8 @@ class Device(object):
         cmd.capability |= 1 << CMD.AssocCapability.allocate_address
         packet += cmd.encode()
 
-        self.dev.send_packet(packet)
+        self.send_packet_wait_ack(packet)
         self.dsn = (self.dsn + 1) & 0xFF
-
-    def button_handler(self, button):
-        if button == 1:
-            self.send_beacon_request()
 
     def bcn_handler(self, mhr, bcn, payload):
         if self.panid <= 0xFFFD:
@@ -97,24 +110,46 @@ class Device(object):
             return
         if self.service not in bcn.services:
             return
-        self.send_assoc_req(mhr.src_panid, mhr.src_addr)
+        self.send_assoc_request(mhr.src_panid, mhr.src_addr)
 
     def packet_handler(self, packet, rssi):
         debug_packet(packet)
 
         mhr, payload = MHR.decode(packet)
-        if mhr.frame_control & 0x7 == MHR.FrameType.bcn:
+        if mhr.frame_control & 0x7 == MHR.FrameType.ack:
+            if self.packet and mhr.seq_num == self.packet_seq:
+                self.packet = None
+                self.packet_retry = 0
+        elif mhr.frame_control & 0x7 == MHR.FrameType.bcn:
             bcn, payload = BCN.decode(payload)
             self.bcn_handler(mhr, bcn, payload)
+
+    def button_handler(self, button):
+        if button == 1:
+            self.send_beacon_request()
 
     def loop(self):
         try:
             while True:
-                event, data = self.dev.event_queue.get()
-                if event == DEV.Event.on_packet:
-                    self.packet_handler(*data)
-                elif event == DEV.Event.on_button:
-                    self.button_handler(*data)
+                try:
+                    event, data = self.dev.event_queue.get(timeout=0.25)
+                    if event == DEV.Event.on_packet:
+                        self.packet_handler(*data)
+                    elif event == DEV.Event.on_button:
+                        self.button_handler(*data)
+                except Empty:
+                    pass
+
+                now = time()
+
+                if self.packet and self.packet_last + 0.25 <= now:
+                    self.packet_last = now
+                    if self.packet_retry < 10:
+                        self.dev.send_packet(self.packet)
+                        self.packet_retry += 1
+                    else:
+                        self.packet = None
+
         except KeyboardInterrupt:
             self.dev.shutdown()
 

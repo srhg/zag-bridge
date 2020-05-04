@@ -102,6 +102,11 @@ class DEV(object):
     class TxMode(IntFlag):
         send_on_cca = 1
 
+    @unique
+    class Leds(IntFlag):
+        red   = 1
+        green = 2
+
     def __init__(self, port):
         self.serial = Serial(port, timeout=0.1)
         self.serial.write(b'\xAAZAG')
@@ -146,8 +151,11 @@ class DEV(object):
                 self.event_queue.put((event, data))
                 continue
 
-            response = DEV.Response(response)
-            self.reader_queue.put((response, data))
+            try:
+                response = DEV.Response(response)
+                self.reader_queue.put((response, data))
+            except:
+                pass
 
     def write(self, cmd, data=b''):
         packet = DEV.header_struct.pack(cmd.value, len(data)) + data
@@ -217,7 +225,7 @@ class DEV(object):
         return leds
 
     def set_leds(self, mask, values):
-        data = struct.pack('!BB', int(mask), int(values))
+        data = struct.pack('!BB', int(mask) & 0xFF, int(values) & 0xFF)
         self.write(DEV.Request.set_leds, data)
         return True
 
