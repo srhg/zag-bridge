@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
 
-from binascii import hexlify
+from binascii import hexlify, unhexlify
 from configparser import ConfigParser
+from enum import IntEnum, unique
 import sys
 from time import sleep
-from zag import *
 from queue import Queue, Empty
 from random import randint
 from time import time
+from zag import *
 
 class Device(object):
+    @unique
+    class AssocState(IntEnum):
+        idle = 0
+        wait_response = 1
+
     def __init__(self, port):
         self.dev = DEV(port)
         _, self.long_addr = self.dev.get_object(DEV.Param.long_addr, 8)
@@ -20,6 +26,7 @@ class Device(object):
 
         self.dsn = randint(0, 255)
         self.packet = None
+        self.assoc_state = Device.AssocState.idle
 
         self.dev.set_value(DEV.Param.channel, self.channel)
         self.dev.set_value(DEV.Param.rx_mode, 0)
@@ -30,12 +37,16 @@ class Device(object):
         self.config.read('device.ini')
         self.channel = int(self.config.get('device', 'channel', fallback='11'))
         self.panid = int(self.config.get('device', 'panid', fallback='0xFFFF'), 0)
-        self.coordinator = int(self.config.get('device', 'coordinator', fallback='0xFFFF'), 0)
+        coordinator = self.config.get('device', 'coordinator', fallback='')
+        self.coordinator = unhexlify(coordinator.encode('utf8'))
         self.service = int(self.config.get('device', 'service', fallback=-1), 0)
         self.ssid = self.config.get('device', 'ssid', fallback=None)
 
     def save_config(self):
-        with open('coordinator.ini', 'w') as config_file:
+        self.config['device']['coordinator'] =  hexlify(self.coordinator).decode('utf8')
+        self.config['device']['panid'] = '0x%04X' % self.panid
+        self.config['device']['short_addr'] = '0x%04X' % self.short_addr
+        with open('device.ini', 'w') as config_file:
             self.config.write(config_file)
 
     def send_packet_wait_ack(self, packet):
@@ -49,7 +60,7 @@ class Device(object):
         mhr = MHR()
         mhr.frame_control |= MHR.FrameType.ack << MHR.FrameControl.type
         mhr.seq_num = seq_num
-        packet += mhr.encode()
+        packet = mhr.encode()
         self.dev.send_packet(packet)
 
     def send_beacon_request(self):
@@ -69,6 +80,9 @@ class Device(object):
         self.dsn = (self.dsn + 1) & 0xFF
 
     def send_assoc_request(self, panid, short_addr):
+        self.assoc_state = Device.AssocState.wait_response
+        self.assoc_start = time()
+
         mhr = MHR()
         mhr.frame_control |= MHR.FrameType.cmd << MHR.FrameControl.type
         mhr.frame_control |= 1 << MHR.FrameControl.req_ack
@@ -92,8 +106,6 @@ class Device(object):
         self.dsn = (self.dsn + 1) & 0xFF
 
     def bcn_handler(self, mhr, bcn, payload):
-        if self.panid <= 0xFFFD:
-            return
         if mhr.frame_control >> MHR.FrameControl.src_mode & 0x3 != MHR.AddrMode.short:
             return
         if mhr.frame_control >> MHR.FrameControl.dst_mode & 0x3 != MHR.AddrMode.none:
@@ -112,6 +124,28 @@ class Device(object):
             return
         self.send_assoc_request(mhr.src_panid, mhr.src_addr)
 
+    def association_response_handler(self, mhr, cmd):
+        if self.assoc_state != Device.AssocState.wait_response:
+            return
+        if not mhr.frame_control & (1 << MHR.FrameControl.req_ack):
+            return
+        if mhr.frame_control >> MHR.FrameControl.dst_mode & 0x3 != MHR.AddrMode.long:
+            return
+        if mhr.frame_control >> MHR.FrameControl.src_mode & 0x3 != MHR.AddrMode.long:
+            return
+        if mhr.dst_addr != self.long_addr:
+            return
+        self.send_ack(mhr.seq_num)
+        self.panid = mhr.dst_panid
+        self.coordinator = mhr.src_addr
+        self.short_addr = cmd.short_addr
+        self.save_config()
+        self.assoc_state = Device.AssocState.idle
+
+    def cmd_handler(self, mhr, cmd, payload):
+        if cmd.identifier == CMD.Identifier.association_response:
+            self.association_response_handler(mhr, cmd)
+
     def packet_handler(self, packet, rssi):
         debug_packet(packet)
 
@@ -123,6 +157,9 @@ class Device(object):
         elif mhr.frame_control & 0x7 == MHR.FrameType.bcn:
             bcn, payload = BCN.decode(payload)
             self.bcn_handler(mhr, bcn, payload)
+        elif mhr.frame_control & 0x7 == MHR.FrameType.cmd:
+            cmd, payload = CMD.decode(payload)
+            self.cmd_handler(mhr, cmd, payload)            
 
     def button_handler(self, button):
         if button == 1:
@@ -149,6 +186,9 @@ class Device(object):
                         self.packet_retry += 1
                     else:
                         self.packet = None
+
+                if self.assoc_state and self.assoc_start + 35 <= now:
+                    self.assoc_state = Device.AssocState.idle
 
         except KeyboardInterrupt:
             self.dev.shutdown()
