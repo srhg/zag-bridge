@@ -16,6 +16,7 @@ class Coordinator(object):
         print('I\'m %s' % (hexlify(self.long_addr).decode('utf8').upper()),)
 
         self.config = ConfigParser()
+        self.config.optionxform = str
         self.load_config()
 
         if self.panid == 0xFFFF:
@@ -45,14 +46,14 @@ class Coordinator(object):
         if not self.config.has_section('devices'):
             self.config.add_section('devices')
         for short_addr, long_addr in self.config.items('devices'):
-            if isinstance(str, short_addr):
+            if isinstance(short_addr, str):
                 short_addr = int(short_addr, 0)
             self.devices[short_addr] = unhexlify(long_addr.encode('utf8'))
 
     def save_config(self):
         self.config['coordinator']['panid'] = '0x%04X' % self.panid
         for short_addr, long_addr in self.devices.items():
-            self.config['devices']['0x%04X' % short_addr] = hexlify(long_addr).decode('utf8')
+            self.config['devices']['0x%04X' % short_addr] = hexlify(long_addr).decode('utf8').upper()
         with open('coordinator.ini', 'w') as config_file:
             self.config.write(config_file)
 
@@ -176,6 +177,10 @@ class Coordinator(object):
         if mhr.src_panid != 0xFFFF:
             return
         self.send_ack(mhr.seq_num)
+
+        if self.associate and self.associate != mhr.src_addr:
+            self.send_association_response(mhr.src_addr, True)
+            return
 
         if mhr.src_addr in self.devices.values():
             self.send_association_response(mhr.src_addr)

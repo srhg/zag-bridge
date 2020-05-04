@@ -22,6 +22,7 @@ class Device(object):
         print('I\'m %s' % (hexlify(self.long_addr).decode('utf8').upper()),)
 
         self.config = ConfigParser()
+        self.config.optionxform = str
         self.load_config()
 
         self.dsn = randint(0, 255)
@@ -43,7 +44,7 @@ class Device(object):
         self.ssid = self.config.get('device', 'ssid', fallback=None)
 
     def save_config(self):
-        self.config['device']['coordinator'] =  hexlify(self.coordinator).decode('utf8')
+        self.config['device']['coordinator'] =  hexlify(self.coordinator).decode('utf8').upper()
         self.config['device']['panid'] = '0x%04X' % self.panid
         self.config['device']['short_addr'] = '0x%04X' % self.short_addr
         with open('device.ini', 'w') as config_file:
