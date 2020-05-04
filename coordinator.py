@@ -27,6 +27,7 @@ class Coordinator(object):
         self.dsn = randint(0, 255)
         self.associate = None
         self.packet = None
+        self.blink = 0
 
         self.dev.set_value(DEV.Param.channel, self.channel)
         self.dev.set_value(DEV.Param.rx_mode, 0)
@@ -58,7 +59,12 @@ class Coordinator(object):
     def wait_associate(self, src_addr):
         self.associate_start = time()
         self.associate = src_addr
-        self.dev.set_leds(DEV.Leds.green, DEV.Leds.green)
+        self.start_blink(DEV.Leds.green)
+
+    def start_blink(self, leds):
+        self.dev.set_leds(leds, leds)
+        self.blink |= leds
+        self.blink_last = time()
 
     def send_packet_wait_ack(self, packet):
         self.packet = packet
@@ -196,6 +202,7 @@ class Coordinator(object):
                 self.send_association_response(self.associate)
                 self.associate = None
                 self.dev.set_leds(DEV.Leds.green, ~DEV.Leds.green)
+                self.blink &= ~DEV.Leds.green
 
     def loop(self):
         try:
@@ -214,7 +221,12 @@ class Coordinator(object):
                 if self.associate and self.associate_start + 30 <= now:
                     self.send_association_response(self.associate, True)
                     self.associate = None
+                    slelf.blink &= ~DEV.Leds.green
                     self.dev.set_leds(DEV.Leds.green, ~DEV.Leds.green)
+
+                if self.blink and self.blink_last + 0.25 <= now:
+                    self.blink_last = now
+                    self.dev.set_leds(self.blink, self.dev.get_leds() ^ self.blink)
 
                 if self.packet and self.packet_last + 0.25 <= now:
                     self.packet_last = now
